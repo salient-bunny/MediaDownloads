@@ -1,0 +1,202 @@
+version: '3.7'
+services:
+  gluetun:
+    image: qmcgaw/gluetun
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - gluetun_settings:/gluetun/config.conf:rw
+    environment:
+      - VPNSP=custom
+      - VPN_TYPE=wireguard
+      - WIREGUARD_ENDPOINT_IP=${WIREGUARD_ENDPOINT_IP:?err}
+      - WIREGUARD_ENDPOINT_PORT=${WIREGUARD_ENDPOINT_PORT:?err}
+      - WIREGUARD_PUBLIC_KEY=${WIREGUARD_PUBLIC_KEY:?err}
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY:?err}
+      - WIREGUARD_PRESHARED_KEY=${WIREGUARD_PRESHARED_KEY:?err}
+      - WIREGUARD_ADDRESS=${WIREGUARD_ADDRESS:?err}
+      - TZ=${TIME_ZONE:?err}
+      - UID=${USER_ID:?err}
+      - GID=${GROUP_ID:?err}
+    ports:
+      - 8888:8888/tcp # HTTP proxy
+      - 8388:8388/tcp # Shadowsocks
+      - 8388:8388/udp # Shadowsocks
+      - 9117:9117 # jackett
+      - 5076:5076 # nzbHydra2
+      - 6881:6881 #qbittorrent
+      - 6881:6881/udp #qbittorrent
+      - 8003:8003 #qbittorrent - Must match each other and the WEBUI_PORT
+    dns:
+      - ${VPN_DNS:?err}
+    networks:
+      - media
+    restart: unless-stopped
+    init: true
+
+  nzbhydra2:
+    image: linuxserver/nzbhydra2
+    container_name: nzbhydra2
+    depends_on:
+      - gluetun
+    network_mode: "service:gluetun"
+    environment:
+      - PUID=${USER_ID:?err}
+      - PGID=${GROUP_ID:?err}
+      - TZ=${TIME_ZONE:?err}
+    volumes:
+      - nzbhydra2_settings:/config
+      - /mnt/downloads/nzbget/:/downloads
+    restart: unless-stopped
+    init: false
+
+  jackett:
+    image: linuxserver/jackett
+    container_name: jackett
+    depends_on:
+      - gluetun
+    network_mode: "service:gluetun"
+    environment:
+      PUID: ${USER_ID:?err}
+      PGID: ${GROUP_ID:?err}
+      TZ: ${TIME_ZONE:?err}
+      AUTO_UPDATE: "true" #optional
+    volumes:
+      - jackett_settings:/config
+      - blackhole:/downloads
+    restart: unless-stopped
+    init: false
+
+  qbittorrent: # settings -> Web UI -> Security: disable clickjacking & CSRF protection
+    image: linuxserver/qbittorrent
+    container_name: qbittorrent
+    depends_on: 
+      - gluetun
+    network_mode: "service:gluetun"
+    environment:
+      PUID: ${USER_ID:?err}
+      PGID: ${GROUP_ID:?err}
+      TZ: ${TIME_ZONE:?err}
+      WEBUI_PORT: 8003
+    volumes:
+      - qbittorrent_settings:/config
+      - /mnt/downloads/qbittorrent:/downloads
+    restart: unless-stopped
+    init: false
+
+  nzbget:
+    image: linuxserver/nzbget
+    container_name: nzbget
+    volumes:
+      - /mnt/downloads/nzbget:/nzbget
+      - nzbget_settings:/config
+    environment:
+      PUID: ${USER_ID:?err}
+      PGID: ${GROUP_ID:?err}
+      TZ: ${TIME_ZONE:?err}
+    ports:
+      - 8004:6789
+    networks:
+      - media
+    restart: unless-stopped
+    init: false
+
+  sonarr:
+    image: linuxserver/sonarr
+    container_name: sonarr
+    volumes:
+      - /mnt:/mnt
+      - sonarr_settings:/config
+    environment:
+      PUID: ${USER_ID:?err}
+      PGID: ${GROUP_ID:?err}
+      TZ: ${TIME_ZONE:?err}
+    ports:
+      - 8002:8989
+    depends_on:
+      - gluetun
+      - qbittorrent
+      - nzbhydra2
+      - jackett
+      - nzbget
+    networks:
+      - media
+    restart: unless-stopped
+    init: false
+        
+  portainer:
+    image: portainer/portainer-ce
+    container_name: portainer
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_settings:/data
+    ports:
+      - 8000:9000
+    networks:
+      - media
+    restart: unless-stopped
+    init: true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  netdata:
+    image: netdata/netdata
+    container_name: netdata
+    hostname: zoom # set to fqdn of host
+    restart: unless-stopped
+    init: true
+    environment:
+      PGID: ${USER_ID:?err}
+    ports:
+      - 19999:19999
+    networks:
+      - media
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  muximux:
+    image: linuxserver/muximux
+    container_name: muximux
+    volumes:
+      - muximux_settings:/config
+    environment:
+      PUID: ${USER_ID:?err}
+      PGID: ${GROUP_ID:?err}
+      TZ: ${TIME_ZONE:?err}
+    ports:
+      - 8001:80
+    networks:
+      - media
+    restart: unless-stopped
+    init: false
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  media:
+
+volumes:
+  utorrent_settings:
+  sonarr_settings:
+  nzbget_settings:
+  portainer_settings:
+  muximux_settings:
+  qbittorrent_settings:
+  wireguard_settings:
+  jackett_settings:
+  blackhole:
+  gluetun_settings:
+  nzbhydra2_settings:
