@@ -82,8 +82,14 @@ services:
     volumes:
       - qbittorrent_settings:/config
       - /mnt/downloads/qbittorrent:/downloads
-    restart: unless-stopped
+    restart: always
     init: false
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost || exit 1"]
+      interval: 24h
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   nzbget:
     image: linuxserver/nzbget
